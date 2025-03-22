@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.devtools.ksp")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -48,6 +49,13 @@ dependencies {
     annotationProcessor(libs.androidx.room.compiler)
     ksp(libs.androidx.room.compiler) // For KSP (Kotlin Symbol Processing)
 
+    implementation(libs.androidx.datastore.preferences)
+
+    // Crashlytics
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.crashlytics)
+    implementation(libs.firebase.analytics)
+
     implementation(libs.lifecycle.viewmodel.compose) // Replace with the latest stable version if necessary
     implementation(libs.ui) // Replace with the latest version
     implementation(libs.material3) // Replace with the latest version
@@ -69,4 +77,8 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+
+    implementation(libs.firebase.analytics.ktx)
+    implementation(libs.gson)
+    implementation(libs.okhttp)
 }

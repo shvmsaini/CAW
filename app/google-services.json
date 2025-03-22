@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "373532844707",
+    "project_id": "caw-studios",
+    "storage_bucket": "caw-studios.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:373532844707:android:d46dc8c594bf2f6af59516",
+        "android_client_info": {
+          "package_name": "com.example.myapplication"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBAtuQCrIRUAanm9EONFl94XOY7yqfz1kw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,17 @@
+[
+  {
+    "taskName": "Grocery Shopping",
+    "description": "Buy milk, eggs, bread, and cheese",
+    "completed": false
+  },
+  {
+    "taskName": "Pay Bills",
+    "description": "Pay electric and internet bills",
+    "completed": false
+  },
+  {
+    "taskName": "Book Doctor Appointment",
+    "description": "Schedule checkup with Dr. Smith",
+    "completed": false
+  }
+]

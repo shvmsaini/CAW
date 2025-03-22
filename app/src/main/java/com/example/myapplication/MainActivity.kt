@@ -1,10 +1,11 @@
 package com.example.myapplication
 
+import android.content.Context
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,11 +27,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +48,12 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.edit
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myapplication.data.DefaultTaskRepository
 import com.example.myapplication.data.Task
@@ -54,14 +61,38 @@ import com.example.myapplication.data.TaskDatabase
 import com.example.myapplication.ui.TaskViewModel
 import com.example.myapplication.ui.TaskViewModelFactory
 import com.example.myapplication.ui.theme.MyApplicationTheme
+import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
+import com.google.firebase.analytics.FirebaseAnalytics
+import com.google.firebase.analytics.analytics
+import com.google.firebase.analytics.logEvent
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
+import java.lang.reflect.Type
+
+val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+
+val IS_FIRST_LAUNCH = booleanPreferencesKey("is_first_launch")
 
 class MainActivity : ComponentActivity() {
+    private lateinit var firebaseAnalytics: FirebaseAnalytics
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        firebaseAnalytics = Firebase.analytics
         setContent {
             MyApplicationTheme {
-                TaskApp()
+                TaskApp(context = LocalContext.current, firebaseAnalytics = firebaseAnalytics)
             }
         }
     }
@@ -70,25 +101,55 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TaskApp(
+    context: Context,
+    firebaseAnalytics: FirebaseAnalytics,
     taskViewModel: TaskViewModel = viewModel(
         factory = TaskViewModelFactory(
-            DefaultTaskRepository(TaskDatabase.getDatabase(LocalContext.current).taskDao())
+            DefaultTaskRepository(TaskDatabase.getDatabase(context).taskDao())
         )
     )
 ) {
     val tasks by taskViewModel.allTasks.collectAsState(initial = emptyList())
     var showDialog by remember { mutableStateOf(false) }
+    val isFirstLaunch = remember { mutableStateOf(true) }
+
+    // Load predefined tasks from JSON
+    LaunchedEffect(Unit) {
+        isFirstLaunch.value = context.dataStore.data.first()[IS_FIRST_LAUNCH] ?: true
+        if (isFirstLaunch.value) {
+            val predefinedTasks = loadTasksFromLocalJson(context)
+            predefinedTasks.forEach { task ->
+                taskViewModel.insertTask(task)
+            }
+            context.dataStore.edit { preferences ->
+                preferences[IS_FIRST_LAUNCH] = false
+            }
+        }
+    }
+    // Fetch tasks from the API and add them to the db.
+    LaunchedEffect(Unit) {
+        fetchTasksFromApi(taskViewModel)
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         floatingActionButton = {
-            FloatingActionButton(onClick = { showDialog = true }) {
+            FloatingActionButton(onClick = {
+                showDialog = true
+                firebaseAnalytics.logEvent("Task Added") {
+                    param("user", "user added a new task")
+                }
+            }) {
                 Icon(Icons.Filled.Add, "Add")
             }
         },
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding)) {
-            TaskList(tasks = tasks, taskViewModel = taskViewModel)
+            TaskList(
+                tasks = tasks,
+                taskViewModel = taskViewModel,
+                firebaseAnalytics = firebaseAnalytics
+            )
         }
     }
 
@@ -147,17 +208,25 @@ fun AddTaskDialog(onAddTask: (String, String) -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
-fun TaskList(tasks: List<Task>, taskViewModel: TaskViewModel) {
+fun TaskList(
+    tasks: List<Task>,
+    taskViewModel: TaskViewModel,
+    firebaseAnalytics: FirebaseAnalytics
+) {
     LazyColumn(modifier = Modifier.padding(8.dp)) {
         items(tasks) { task ->
-            TaskItem(task = task, taskViewModel = taskViewModel)
+            TaskItem(
+                task = task,
+                taskViewModel = taskViewModel,
+                firebaseAnalytics = firebaseAnalytics
+            )
             Divider()
         }
     }
 }
 
 @Composable
-fun TaskItem(task: Task, taskViewModel: TaskViewModel) {
+fun TaskItem(task: Task, taskViewModel: TaskViewModel, firebaseAnalytics: FirebaseAnalytics) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -198,11 +267,83 @@ fun TaskItem(task: Task, taskViewModel: TaskViewModel) {
             checked = task.completed,
             onCheckedChange = {
                 taskViewModel.updateTask(task.copy(completed = it))
+                if (it) {
+                    firebaseAnalytics.logEvent("Task Completed") {
+                        param("Task", "Task with name ${task.taskName} was completed")
+                    }
+                } else {
+                    firebaseAnalytics.logEvent("Task Edited") {
+                        param("Task", "Task with name ${task.taskName} was edited")
+                    }
+                }
             }
         )
 
-        IconButton(onClick = { taskViewModel.deleteTask(task) }) {
+        IconButton(onClick = {
+            try {
+                taskViewModel.deleteTask(task)
+            } catch (e: Exception) {
+                throw RuntimeException("database Error")
+            }
+        }) {
             Icon(Icons.Filled.Close, "Delete", tint = Color.Red)
         }
     }
 }
+
+// Load Tasks from JSON file.
+fun loadTasksFromLocalJson(context: Context): List<Task> {
+    val jsonString = try {
+        context.assets.open("tasks.json").bufferedReader().use { it.readText() }
+    } catch (e: IOException) {
+        e.printStackTrace()
+        return emptyList()
+    }
+    val gson = Gson()
+    val listTaskType: Type = object : TypeToken<List<Task>>() {}.type
+    return gson.fromJson(jsonString, listTaskType)
+}
+
+// Fetch tasks from the API
+fun fetchTasksFromApi(taskViewModel: TaskViewModel) {
+    val client = OkHttpClient()
+    val request = Request.Builder()
+        .url("https://jsonplaceholder.typicode.com/todos?_limit=5") // Example URL, adjust as needed
+        .build()
+    client.newCall(request).enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            Log.e("Network", "Failed to fetch tasks", e)
+            // Monitor the network performance in Firebase
+            Firebase.analytics.logEvent("network_error") {
+                param("error_message", e.message ?: "unknown error")
+            }
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            if (response.isSuccessful) {
+                response.body?.let { responseBody ->
+                    val jsonString = responseBody.string()
+                    val gson = Gson()
+                    val listTaskType: Type = object : TypeToken<List<ApiTask>>() {}.type
+                    val apiTasks: List<ApiTask> = gson.fromJson(jsonString, listTaskType)
+                    val tasks = apiTasks.map { apiTask ->
+                        Task(
+                            taskName = apiTask.title,
+                            description = "",
+                            completed = apiTask.completed
+                        )
+                    }
+                    CoroutineScope(Dispatchers.Main).launch {
+                        tasks.forEach { task ->
+                            taskViewModel.insertTask(task)
+                        }
+                    }
+                }
+            } else {
+                Log.e("Network", "API request was not successful. Code: ${response.code}")
+            }
+        }
+    })
+}
+
+data class ApiTask(val id: Int, val userId: Int, val title: String, val completed: Boolean)
