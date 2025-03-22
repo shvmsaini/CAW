@@ -49,3 +49,6 @@ a brief overview:
 - **Firebase Analytics:**
     - **Purpose:** track user behavior in the application.
     - **Why:** helps to understand user interaction and monitor network performance.
+      
+## Recording
+[Screen_recording_20250323_044631.webm](https://github.com/user-attachments/assets/2376b379-10e5-4940-89a9-7964e822a638)
